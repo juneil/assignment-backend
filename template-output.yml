@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Globals:
+  Function:
+    Timeout: 20
+    Runtime: nodejs18.x
+    MemorySize: 128
+    Tracing: Active
+    Layers:
+    - Ref: NodeModulesLayer
+    Environment:
+      Variables:
+        TABLE:
+          Ref: Table
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+        NODE_OPTIONS: --enable-source-maps
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${AWS::StackName}-UserPool
+      UsernameAttributes:
+      - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      Schema:
+      - AttributeDataType: String
+        Name: email
+        Required: false
+    Metadata:
+      SamResourceId: UserPool
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId:
+        Ref: UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+      - ALLOW_USER_PASSWORD_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+      - ALLOW_USER_SRP_AUTH
+    Metadata:
+      SamResourceId: UserPoolClient
+  UserPoolUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      DesiredDeliveryMediums:
+      - EMAIL
+      Username: fauville.j@gmail.com
+      UserPoolId:
+        Ref: UserPool
+    Metadata:
+      SamResourceId: UserPoolUser
+  NodeModulesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName:
+        Fn::Sub: ${AWS::StackName}-NodeModulesLayer
+      Description: node modules
+      ContentUri: s3://cf-templates-ns-32903290/assignment-backend/11fb8174eb9f3b6635168f83e30a3b9e
+      CompatibleRuntimes:
+      - nodejs18.x
+    Metadata:
+      SamResourceId: NodeModulesLayer
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-Api
+      StageName: v1
+      Auth:
+        Authorizers:
+          CognitoAuth:
+            UserPoolArn:
+              Fn::GetAtt:
+              - UserPool
+              - Arn
+      EndpointConfiguration:
+        Type: REGIONAL
+      MethodSettings:
+      - ResourcePath: /*
+        HttpMethod: '*'
+        DataTraceEnabled: true
+        LoggingLevel: INFO
+        MetricsEnabled: true
+        ThrottlingRateLimit: 5
+        ThrottlingBurstLimit: 10
+      Cors:
+        AllowMethods: '''POST,GET,PUT'''
+        AllowHeaders:
+          Fn::Sub: '''*'''
+        AllowOrigin:
+          Fn::Sub: '''*'''
+        MaxAge: '''600'''
+    Metadata:
+      SamResourceId: Api
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+      - AttributeName: PK
+        AttributeType: S
+      - AttributeName: SK
+        AttributeType: S
+      KeySchema:
+      - AttributeName: PK
+        KeyType: HASH
+      - AttributeName: SK
+        KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+    Metadata:
+      SamResourceId: Table
+  PostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cf-templates-ns-32903290/assignment-backend/9b5564f29eaaead25266262b75f51b49
+      Handler: index.handler
+      Events:
+        Resource:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /feedback
+            Method: post
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: Table
+    Metadata:
+      SamResourceId: PostFunction
+  ListFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cf-templates-ns-32903290/assignment-backend/9e927bb75179942715e563cd42dea9ba
+      Handler: index.handler
+      Events:
+        Resource:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /feedback
+            Method: get
+            Auth:
+              Authorizer: CognitoAuth
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: Table
+    Metadata:
+      SamResourceId: ListFunction

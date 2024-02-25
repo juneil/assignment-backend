@@ -1,0 +1,14 @@
+{
+    "env": {
+        "es6": true
+    },
+    "extends": [
+        "eslint:recommended",
+        "prettier"
+    ],
+    "printWidth": 100,
+    "trailingComma": "none",
+    "tabWidth": 4,
+    "semi": true,
+    "singleQuote": true
+}

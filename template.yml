@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+    Function:
+        Timeout: 20
+        Runtime: nodejs18.x
+        MemorySize: 128
+        Tracing: Active
+        Layers: 
+            - !Ref NodeModulesLayer
+        Environment:
+            Variables:
+                TABLE: !Ref Table
+                AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+                NODE_OPTIONS: '--enable-source-maps'
+
+Resources:
+    UserPool:
+        Type: AWS::Cognito::UserPool
+        Properties:
+            UserPoolName: !Sub '${AWS::StackName}-UserPool'
+            UsernameAttributes:
+                - email
+            Policies:
+                PasswordPolicy:
+                    MinimumLength: 8
+            Schema:
+                - AttributeDataType: String
+                  Name: email
+                  Required: false
+
+    UserPoolClient:
+        Type: AWS::Cognito::UserPoolClient
+        Properties:
+            UserPoolId: !Ref UserPool
+            GenerateSecret: false
+            ExplicitAuthFlows:
+                - ALLOW_USER_PASSWORD_AUTH
+                - ALLOW_REFRESH_TOKEN_AUTH
+                - ALLOW_USER_SRP_AUTH
+
+    UserPoolUser:
+        Type: AWS::Cognito::UserPoolUser
+        Properties:
+            DesiredDeliveryMediums:
+                - EMAIL
+            Username: fauville.j@gmail.com
+            UserPoolId: !Ref UserPool
+
+    NodeModulesLayer:
+        Type: AWS::Serverless::LayerVersion
+        Properties:
+            LayerName: !Sub '${AWS::StackName}-NodeModulesLayer'
+            Description: node modules
+            ContentUri: ./dist/layer
+            CompatibleRuntimes:
+                - nodejs18.x
+    Api:
+        Type: AWS::Serverless::Api
+        Properties:
+            Name: !Sub '${AWS::StackName}-Api'
+            StageName: v1
+            Auth:
+                Authorizers:
+                    CognitoAuth:
+                        UserPoolArn: !GetAtt UserPool.Arn
+            EndpointConfiguration:
+                Type: REGIONAL
+            MethodSettings:
+                - ResourcePath: '/*'
+                  HttpMethod: '*'
+                  DataTraceEnabled: true
+                  LoggingLevel: INFO
+                  MetricsEnabled: true
+                  ThrottlingRateLimit: 5
+                  ThrottlingBurstLimit: 10
+            Cors:
+                AllowMethods: "'POST,GET,PUT'"
+                AllowHeaders: !Sub "'*'"
+                AllowOrigin: !Sub "'*'"
+                MaxAge: "'600'"
+
+    Table:
+        Type: AWS::DynamoDB::Table
+        Properties:
+            SSESpecification:
+                SSEEnabled: true
+            AttributeDefinitions:
+                - AttributeName: 'PK'
+                  AttributeType: 'S'
+                - AttributeName: 'SK'
+                  AttributeType: 'S'
+            KeySchema:
+                - AttributeName: 'PK'
+                  KeyType: 'HASH'
+                - AttributeName: 'SK'
+                  KeyType: 'RANGE'
+            BillingMode: 'PAY_PER_REQUEST'
+
+    PostFunction:
+        Type: AWS::Serverless::Function
+        Properties:
+            CodeUri: ./dist/post-feedback
+            Handler: index.handler
+            Events:
+                Resource:
+                    Type: Api
+                    Properties:
+                        RestApiId: !Ref Api
+                        Path: /feedback
+                        Method: post
+            Policies:
+                - DynamoDBCrudPolicy:
+                      TableName: !Ref Table
+    ListFunction:
+        Type: AWS::Serverless::Function
+        Properties:
+            CodeUri: ./dist/list-feedback
+            Handler: index.handler
+            Events:
+                Resource:
+                    Type: Api
+                    Properties:
+                        RestApiId: !Ref Api
+                        Path: /feedback
+                        Method: get
+                        Auth:
+                            Authorizer: CognitoAuth
+            Policies:
+                - DynamoDBCrudPolicy:
+                      TableName: !Ref Table
